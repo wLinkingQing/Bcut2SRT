@@ -1,5 +1,6 @@
 # 必剪字幕格式转换工具
 
+## 在线体验网址：https://wlinkingqing.github.io/Bcut2SRT/Bcut2SRT.html
 
 ## 功能简介
 
