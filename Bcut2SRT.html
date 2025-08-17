@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>必剪字幕格式转换工具</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .converter {
+            border: 1px solid #ccc;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+        .drop-area {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 10px;
+            border-radius: 5px;
+        }
+        .drop-area.highlight {
+            border-color: #007BFF;
+        }
+        textarea {
+            width: 100%;
+            height: 100px;
+            margin-bottom: 10px;
+        }
+        button {
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <h1>必剪字幕格式转换工具</h1>
+
+    <div class="converter">
+        <h2>bjson 转 SRT</h2>
+        <div class="drop-area" id="bjson-drop-area">
+            拖拽 .bjson 文件到此处，或点击选择文件
+        </div>
+        <input type="file" id="bjson-file-input" accept=".bjson,.json" style="display: none;">
+        <button id="bjson-to-srt-btn">转换</button>
+    </div>
+
+    <div class="converter">
+        <h2>SRT 转 bjson</h2>
+        <div class="drop-area" id="srt-drop-area">
+            拖拽 .srt 文件到此处，或点击选择文件
+        </div>
+        <input type="file" id="srt-file-input" accept=".srt" style="display: none;">
+        <div class="drop-area" id="template-drop-area">
+            拖拽 .bjson 模板文件到此处，或点击选择文件
+        </div>
+        <input type="file" id="template-file-input" accept=".bjson,.json" style="display: none;">
+        <button id="srt-to-bjson-btn">转换</button>
+    </div>
+
+    <div class="converter">
+        <h2>文本转 SRT</h2>
+        <textarea id="text-input" placeholder="输入文字稿"></textarea>
+        <button id="text-to-srt-btn">转换</button>
+    </div>
+
+    <script>
+        // 辅助函数
+        function msToSrtTime(ms) {
+            const seconds = Math.floor(ms / 1000);
+            const milliseconds = ms % 1000;
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(milliseconds).padStart(3, '0')}`;
+        }
+
+        function parseSrtTime(timeStr) {
+            const timePart = timeStr.replace(',', ':').split(':');
+            const hours = parseInt(timePart[0]);
+            const minutes = parseInt(timePart[1]);
+            const seconds = parseInt(timePart[2]);
+            const milliseconds = parseInt(timePart[3]);
+            return (hours * 3600 + minutes * 60 + seconds) * 1000 + milliseconds;
+        }
+
+        function downloadFile(content, filename, contentType) {
+            const blob = new Blob([content], { type: contentType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 100);
+        }
+
+        // 文件拖放功能
+        function setupDropArea(dropAreaId, fileInputId) {
+            const dropArea = document.getElementById(dropAreaId);
+            const fileInput = document.getElementById(fileInputId);
+
+            dropArea.addEventListener('click', () => {
+                fileInput.click();
+            });
+
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files.length > 0) {
+                    dropArea.textContent = `已选择文件: ${fileInput.files[0].name}`;
+                }
+            });
+
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, preventDefaults, false);
+            });
+
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropArea.addEventListener(eventName, highlight, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, unhighlight, false);
+            });
+
+            function highlight() {
+                dropArea.classList.add('highlight');
+            }
+
+            function unhighlight() {
+                dropArea.classList.remove('highlight');
+            }
+
+            dropArea.addEventListener('drop', handleDrop, false);
+
+            function handleDrop(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+
+                if (files.length > 0) {
+                    fileInput.files = files;
+                    dropArea.textContent = `已选择文件: ${files[0].name}`;
+                }
+            }
+        }
+
+        // bjson 转 SRT
+        function bjsonToSrt(bjsonData) {
+            const captions = [];
+            const captionTracks = bjsonData.timelineWidget?.timeline?.captionTracks || [];
+            
+            captionTracks.forEach(track => {
+                track.captions?.forEach(caption => {
+                    captions.push({
+                        start_time: caption.inPoint || 0,
+                        end_time: caption.outPoint || 0,
+                        text: caption.captionText || ""
+                    });
+                });
+            });
+
+            let srtContent = "";
+            captions.forEach((caption, index) => {
+                const startTimeStr = msToSrtTime(caption.start_time);
+                const endTimeStr = msToSrtTime(caption.end_time);
+                srtContent += `${index + 1}\n${startTimeStr} --> ${endTimeStr}\n${caption.text}\n\n`;
+            });
+
+            return srtContent;
+        }
+
+        // SRT 转 bjson
+        function parseSrtContent(srtContent) {
+            const captions = [];
+            // 统一换行符为 \n
+            const normalizedContent = srtContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            // 按空行分割 SRT 条目
+            const entries = normalizedContent.trim().split('\n\n');
+            
+            entries.forEach(entry => {
+                const lines = entry.split('\n');
+                if (lines.length >= 3) {
+                    const timeLine = lines[1];
+                    const timeMatch = timeLine.match(/(\d{2}:\d{2}:\d{2},\d{3})/g);
+                    if (timeMatch && timeMatch.length === 2) {
+                        // 只取当前字幕块的文本内容
+                        const text = lines.slice(2).join('\n').trim();
+                        captions.push({
+                            start_time: parseSrtTime(timeMatch[0]),
+                            end_time: parseSrtTime(timeMatch[1]),
+                            text: text
+                        });
+                    }
+                }
+            });
+
+            return captions;
+        }
+
+        function srtToBjson(srtContent, templateData) {
+            const srtCaptions = parseSrtContent(srtContent);
+            const template = templateData.timelineWidget?.timeline?.captionTracks?.[0]?.captions?.[0];
+            if (!template) return templateData;
+
+            const newCaptions = srtCaptions.map((caption, index) => {
+                const newCaption = JSON.parse(JSON.stringify(template));
+                newCaption.assetInfo.content = caption.text;
+                newCaption.assetInfo.displayName = caption.text;
+                newCaption.assetInfo.duration = caption.end_time - caption.start_time;
+                newCaption.captionText = caption.text;
+                newCaption.inPoint = caption.start_time;
+                newCaption.outPoint = caption.end_time;
+                newCaption.idString = String(Math.abs(hashCode(String(index) + caption.text)));
+                newCaption.uid = index + 1;
+                return newCaption;
+            });
+
+            const newData = JSON.parse(JSON.stringify(templateData));
+            if (newData.timelineWidget?.timeline?.captionTracks?.[0]) {
+                newData.timelineWidget.timeline.captionTracks[0].captions = newCaptions;
+            }
+            return newData;
+        }
+
+        function hashCode(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                const char = str.charCodeAt(i);
+                hash = (hash << 5) - hash + char;
+                hash = hash & hash; // Convert to 32bit integer
+            }
+            return hash;
+        }
+
+        // 文本转 SRT
+        function splitText(text) {
+            const sentences = text.split(/[ \n，,。！？；;!\?]/);
+            return sentences.filter(s => s.trim()).map(s => s.trim());
+        }
+
+        function estimateDuration(sentence) {
+            const charsPerSecond = 6;
+            let durationInSeconds = sentence.length / charsPerSecond;
+            durationInSeconds = Math.max(1, Math.min(10, durationInSeconds));
+            return durationInSeconds * 1000;
+        }
+
+        function textToSrt(text) {
+            const sentences = splitText(text);
+            let srtContent = '';
+            let currentTime = 0;
+
+            sentences.forEach((sentence, index) => {
+                const start = currentTime;
+                const duration = estimateDuration(sentence);
+                const end = start + duration;
+
+                const startTimeStr = msToSrtTime(start);
+                const endTimeStr = msToSrtTime(end);
+
+                srtContent += `${index + 1}\n${startTimeStr} --> ${endTimeStr}\n${sentence}\n\n`;
+                currentTime = end + 350;
+            });
+
+            return srtContent;
+        }
+
+        // 初始化拖放区域
+        setupDropArea('bjson-drop-area', 'bjson-file-input');
+        setupDropArea('srt-drop-area', 'srt-file-input');
+        setupDropArea('template-drop-area', 'template-file-input');
+
+        // 事件监听
+        document.getElementById('bjson-to-srt-btn').addEventListener('click', () => {
+            const fileInput = document.getElementById('bjson-file-input');
+            if (fileInput.files.length === 0) {
+                alert('请选择 .bjson 文件');
+                return;
+            }
+
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const bjsonData = JSON.parse(e.target.result);
+                    const srtContent = bjsonToSrt(bjsonData);
+                    downloadFile(srtContent, 'output.srt', 'text/plain');
+                } catch (error) {
+                    alert(`转换失败: ${error.message}`);
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        document.getElementById('srt-to-bjson-btn').addEventListener('click', () => {
+            const srtInput = document.getElementById('srt-file-input');
+            const templateInput = document.getElementById('template-file-input');
+            if (srtInput.files.length === 0 || templateInput.files.length === 0) {
+                alert('请选择 .srt 文件和 .bjson 模板文件');
+                return;
+            }
+
+            const srtFile = srtInput.files[0];
+            const templateFile = templateInput.files[0];
+            const srtReader = new FileReader();
+            const templateReader = new FileReader();
+
+            srtReader.onload = function(srtEvent) {
+                templateReader.onload = function(templateEvent) {
+                    try {
+                        const srtContent = srtEvent.target.result;
+                        const templateData = JSON.parse(templateEvent.target.result);
+                        const newBjsonData = srtToBjson(srtContent, templateData);
+                        const bjsonStr = JSON.stringify(newBjsonData, null, 4);
+                        downloadFile(bjsonStr, 'output.bjson', 'application/json');
+                    } catch (error) {
+                        alert(`转换失败: ${error.message}`);
+                    }
+                };
+                templateReader.readAsText(templateFile);
+            };
+            srtReader.readAsText(srtFile);
+        });
+
+        document.getElementById('text-to-srt-btn').addEventListener('click', () => {
+            const textInput = document.getElementById('text-input');
+            if (textInput.value.trim() === '') {
+                alert('请输入文字稿');
+                return;
+            }
+
+            try {
+                const srtContent = textToSrt(textInput.value);
+                downloadFile(srtContent, 'output.srt', 'text/plain');
+            } catch (error) {
+                alert(`转换失败: ${error.message}`);
+            }
+        });
+    </script>
+</body>
+</html>
