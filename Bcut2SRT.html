@@ -191,24 +191,35 @@
         // SRT 转 bjson
         function parseSrtContent(srtContent) {
             const captions = [];
-            // 统一换行符为 \n
-            const normalizedContent = srtContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-            // 按空行分割 SRT 条目
-            const entries = normalizedContent.trim().split('\n\n');
+            // 统一换行符为 \n 并处理不规则时间格式
+            const normalizedContent = srtContent
+                .replace(/\r\n/g, '\n')
+                .replace(/\r/g, '\n')
+                .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2') // 处理逗号分隔的时间格式
+                .replace(/(\d{2}:\d{2}:\d{2})\.(\d{3})/g, '$1,$2'); // 转换回标准SRT格式
+            
+            // 按空行分割 SRT 条目，更健壮的分割方式
+            const entries = normalizedContent.split(/\n\n+/);
             
             entries.forEach(entry => {
-                const lines = entry.split('\n');
+                const lines = entry.split('\n').filter(line => line.trim() !== '');
                 if (lines.length >= 3) {
                     const timeLine = lines[1];
-                    const timeMatch = timeLine.match(/(\d{2}:\d{2}:\d{2},\d{3})/g);
+                    // 更宽松的时间匹配正则，允许小数点或逗号
+                    const timeMatch = timeLine.match(/(\d{2}:\d{2}:\d{2}[,.]\d{3})/g);
                     if (timeMatch && timeMatch.length === 2) {
+                        // 处理时间格式中的小数点
+                        const startTimeStr = timeMatch[0].replace('.', ',');
+                        const endTimeStr = timeMatch[1].replace('.', ',');
                         // 只取当前字幕块的文本内容
                         const text = lines.slice(2).join('\n').trim();
-                        captions.push({
-                            start_time: parseSrtTime(timeMatch[0]),
-                            end_time: parseSrtTime(timeMatch[1]),
-                            text: text
-                        });
+                        if (text) { // 确保文本不为空
+                            captions.push({
+                                start_time: parseSrtTime(startTimeStr),
+                                end_time: parseSrtTime(endTimeStr),
+                                text: text
+                            });
+                        }
                     }
                 }
             });
@@ -268,19 +279,20 @@
             const sentences = splitText(text);
             let srtContent = '';
             let currentTime = 0;
-
+        
             sentences.forEach((sentence, index) => {
                 const start = currentTime;
                 const duration = estimateDuration(sentence);
                 const end = start + duration;
-
-                const startTimeStr = msToSrtTime(start);
-                const endTimeStr = msToSrtTime(end);
-
+                
+                // 简化时间格式，只保留毫秒精度
+                const startTimeStr = msToSrtTime(Math.floor(start/10)*10); // 去除微秒部分
+                const endTimeStr = msToSrtTime(Math.floor(end/10)*10); // 去除微秒部分
+        
                 srtContent += `${index + 1}\n${startTimeStr} --> ${endTimeStr}\n${sentence}\n\n`;
                 currentTime = end + 350;
             });
-
+        
             return srtContent;
         }
 
