@@ -264,7 +264,7 @@
 
         // 文本转 SRT
         function splitText(text) {
-            const sentences = text.split(/[ \n，,。！？；;!\?]/);
+            const sentences = text.split(/[ \n，,“”"。！？；;!\?]/);
             return sentences.filter(s => s.trim()).map(s => s.trim());
         }
 
@@ -370,3 +370,4 @@
     </script>
 </body>
 </html>
+
